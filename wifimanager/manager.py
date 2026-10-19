@@ -529,6 +529,7 @@ class WiFiManager:
         self._portal = None
         self._portal_close_at = None
         self._next_try = None
+        self._failed_cycles = 0  # whatever closed it (exit, timeout, success): start counting afresh
         try:
             p.stop()
         except Exception as e:
@@ -555,10 +556,8 @@ class WiFiManager:
             elif ticks_diff(now, p.last_activity) >= self.portal_timeout * 1000:
                 self.log.warning("portal idle for %ds: closing", self.portal_timeout)
                 self._portal_req = False
-                if self._sta != CONNECTED:
-                    if self.portal_timeout_action == "reboot":
-                        self._do_reset()
-                    self._failed_cycles = 0
+                if self._sta != CONNECTED and self.portal_timeout_action == "reboot":
+                    self._do_reset()
         if self._portal_req and self._portal is None:
             self._open_portal()
         elif not self._portal_req and self._portal is not None:

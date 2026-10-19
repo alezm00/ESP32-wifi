@@ -223,6 +223,20 @@ class ManagerTests(unittest.TestCase):
         self.sim.run(wm, ms=20000)
         self.assertFalse(wm.portal_active)
 
+    def test_exit_resets_failed_cycles(self):
+        wm = self.sim.make([("Gone", "password1")], config_mode="on_fail", max_cycles=3)
+        self.assertTrue(self.sim.run(wm, lambda: wm.portal_active, 120000))
+        wm.request_exit()
+        self.assertTrue(self.sim.run(wm, lambda: not wm.portal_active, 20000))
+        self.assertLessEqual(wm._failed_cycles, 1)       # closing resets it; the retry that follows may fail once
+        # the portal must not come back after the first (or second) failed cycle ...
+        for expected in (1, 2):
+            self.assertTrue(self.sim.run(wm, lambda: wm._failed_cycles >= expected, 120000))
+            self.assertFalse(wm.portal_active, "reopened after %d failed cycle(s)" % expected)
+        # ... only after max_cycles new failures
+        self.assertTrue(self.sim.run(wm, lambda: wm.portal_active, 120000))
+        self.assertEqual(wm._failed_cycles, 3)
+
     def test_button_hold_opens_portal(self):
         W.add_ap("Home", "homepass12")
         wm = self.sim.make([("Home", "homepass12")], config_mode="never", button_pin=0, button_hold_ms=3000)
