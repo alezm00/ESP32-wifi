@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WiFi setup</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#1c1e21;--mut:#6b7280;--line:#e5e7eb;--acc:#2563eb;--accfg:#fff;--ok:#16a34a;--bad:#dc2626;--warn:#d97706}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#181b21;--fg:#e6e8eb;--mut:#9aa3af;--line:#2a2f38;--acc:#3b82f6;--ok:#22c55e;--bad:#f87171;--warn:#fbbf24}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:640px;margin:0 auto;padding:16px}
+h1{font-size:1.4rem;margin:4px 0 14px}
+h2{font-size:1rem;margin:0;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+.head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.row{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.row:first-of-type{border-top:0}
+.grow{flex:1;min-width:0}
+@media (max-width:520px){.row.saved{flex-wrap:wrap}.row.saved .grow{flex:1 0 100%}}
+.name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sub{font-size:.8rem;color:var(--mut)}
+.pill{display:inline-block;font-size:.72rem;padding:1px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mut);margin-left:4px;vertical-align:middle}
+.pill.ok{color:var(--ok);border-color:var(--ok)}
+.pill.bad{color:var(--bad);border-color:var(--bad)}
+.pill.warn{color:var(--warn);border-color:var(--warn)}
+button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:8px;padding:6px 12px;cursor:pointer}
+button.pri{background:var(--acc);color:var(--accfg);border-color:var(--acc)}
+button.dng{color:var(--bad)}
+button:disabled{opacity:.5}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.bars{display:inline-flex;align-items:flex-end;gap:2px;height:16px;width:22px;flex:none}
+.bars i{width:4px;background:var(--line);border-radius:1px}
+.bars i.on{background:var(--fg)}
+label{display:block;font-size:.85rem;color:var(--mut);margin:10px 0 4px}
+input[type=text],input[type=password]{width:100%;font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
+.chk{display:flex;align-items:center;gap:8px;margin:10px 0 0;color:var(--fg);font-size:.95rem}
+.pw{display:flex;gap:6px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:.92rem}
+.kv span:nth-child(odd){color:var(--mut)}
+pre{margin:8px 0 0;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all;max-height:260px;overflow:auto}
+#toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:10px;max-width:92vw;opacity:0;pointer-events:none;transition:opacity .2s;z-index:9}
+#toast.show{opacity:1}
+.empty{color:var(--mut);padding:8px 0}
+summary{cursor:pointer}
+</style>
+</head>
+<body>
+<main>
+<h1>WiFi setup <span id="state" class="pill">…</span></h1>
+
+<section class="card">
+  <div class="head"><h2>Status</h2></div>
+  <div class="kv" id="status"></div>
+</section>
+
+<section class="card">
+  <div class="head"><h2>Available networks</h2><button id="scan" class="pri">Scan</button></div>
+  <div id="avail"><div class="empty">Tap “Scan” to look for networks.</div></div>
+</section>
+
+<section class="card">
+  <div class="head"><h2>Saved networks</h2></div>
+  <div id="saved"></div>
+</section>
+
+<section class="card" id="formcard">
+  <div class="head"><h2 id="formtitle">Add network</h2></div>
+  <form id="form" autocomplete="off">
+    <label for="f_ssid">Network name (SSID)</label>
+    <input type="text" id="f_ssid" maxlength="32" required autocapitalize="none" spellcheck="false">
+    <label for="f_pw">Password</label>
+    <div class="pw"><input type="password" id="f_pw" maxlength="64" autocomplete="new-password"><button type="button" id="showpw">Show</button></div>
+    <div class="chk"><input type="checkbox" id="f_hidden"><label for="f_hidden" style="margin:0;color:inherit">Hidden network</label></div>
+    <div class="chk" id="openrow" hidden><input type="checkbox" id="f_open"><label for="f_open" style="margin:0;color:inherit">No password (open network)</label></div>
+    <div class="acts" style="margin-top:14px"><button class="pri" type="submit">Save</button><button type="button" id="cancel" hidden>Cancel</button></div>
+  </form>
+</section>
+
+<section class="card">
+  <details id="logbox"><summary><h2 style="display:inline">Log</h2></summary><pre id="log"></pre></details>
+</section>
+
+<section class="card">
+  <div class="acts"><button id="exit">Exit setup mode</button><button id="reboot" class="dng">Reboot device</button></div>
+</section>
+</main>
+<div id="toast"></div>
+
+<script>
+"use strict";
+var $ = function (id) { return document.getElementById(id); };
+var showPw = false, editing = null, nets = [], timer;
+
+function toast(msg) {
+  var t = $("toast"); t.textContent = msg; t.className = "show";
+  clearTimeout(toast.t); toast.t = setTimeout(function () { t.className = ""; }, 3800);
+}
+function api(path, body) {
+  var o = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)};
+  return fetch("/api/" + path, o).then(function (r) {
+    return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || r.statusText); return j; });
+  });
+}
+function el(tag, cls, text) {
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function pill(text, cls) { return el("span", "pill " + (cls || ""), text); }
+function bars(rssi) {
+  var n = rssi > -55 ? 4 : rssi > -67 ? 3 : rssi > -78 ? 2 : 1, b = el("span", "bars");
+  for (var i = 1; i <= 4; i++) { var s = document.createElement("i"); s.style.height = (i * 25) + "%"; if (i <= n) s.className = "on"; b.appendChild(s); }
+  return b;
+}
+function button(label, cls, fn) { var b = el("button", cls, label); b.type = "button"; b.onclick = fn; return b; }
+
+function renderStatus(s) {
+  var st = $("state"); st.textContent = s.state; st.className = "pill " + (s.connected ? "ok" : s.state === "portal" ? "warn" : "bad");
+  var rows = [["Connection", s.connected ? "connected" : s.state], ["Network", s.ssid || "-"], ["IP address", s.ip || "-"],
+    ["Signal", s.rssi != null ? s.rssi + " dBm" : "-"], ["Config mode", s.mode], ["Hostname", s.hostname]];
+  if (s.last_error) rows.push(["Last error", s.last_error]);
+  if (s.ap_ssid) rows.push(["Setup network", s.ap_ssid]);
+  var box = $("status"); box.textContent = "";
+  rows.forEach(function (r) { box.appendChild(el("span", "", r[0])); box.appendChild(el("span", "", String(r[1]))); });
+  $("exit").hidden = s.mode === "always";
+}
+function poll() {
+  api("status").then(renderStatus).catch(function () {
+    var st = $("state"); st.textContent = "unreachable"; st.className = "pill bad";
+  });
+}
+
+function renderSaved() {
+  var box = $("saved"); box.textContent = "";
+  if (!nets.length) { box.appendChild(el("div", "empty", "No saved networks yet.")); return; }
+  nets.forEach(function (n) {
+    var row = el("div", "row saved"), g = el("div", "grow"), name = el("div", "name", n.ssid);
+    if (n.connected) name.appendChild(pill("connected", "ok"));
+    if (n.hidden) name.appendChild(pill("hidden"));
+    if (!n.has_password) name.appendChild(pill("open", "warn"));
+    g.appendChild(name);
+    var acts = el("div", "acts");
+    acts.appendChild(button("Connect", "pri", function () { connect(n.ssid); }));
+    acts.appendChild(button("Edit", "", function () { edit(n); }));
+    acts.appendChild(button("Delete", "dng", function () { del(n.ssid); }));
+    row.appendChild(g); row.appendChild(acts); box.appendChild(row);
+  });
+}
+function loadNets() { return api("networks").then(function (j) { nets = j.networks; window.showPasswords = j.show_passwords; renderSaved(); }); }
+
+function renderAvail(list, err) {
+  var box = $("avail"); box.textContent = "";
+  if (err) toast(err);
+  if (!list.length) { box.appendChild(el("div", "empty", "No networks found.")); return; }
+  list.forEach(function (n) {
+    var row = el("div", "row"), g = el("div", "grow"), name = el("div", "name", n.ssid);
+    if (n.saved) name.appendChild(pill("saved", "ok"));
+    g.appendChild(name);
+    g.appendChild(el("div", "sub", (n.secure ? "secured" : "open") + " · channel " + n.channel + " · " + n.rssi + " dBm"));
+    row.appendChild(bars(n.rssi)); row.appendChild(g);
+    row.appendChild(button(n.saved ? "Edit" : "Add", "", function () {
+      var s = nets.filter(function (x) { return x.ssid === n.ssid; })[0];
+      s ? edit(s) : add(n.ssid);
+    }));
+    box.appendChild(row);
+  });
+}
+function scan() {
+  var b = $("scan"); b.disabled = true; b.textContent = "Scanning…";
+  api("scan?refresh=1").then(function (j) { renderAvail(j.networks, j.error); })
+    .catch(function (e) { toast("Scan failed: " + e.message); })
+    .then(function () { b.disabled = false; b.textContent = "Scan"; });
+}
+
+function openForm(title, ssid, pw, hidden, isEdit) {
+  $("formtitle").textContent = title;
+  $("f_ssid").value = ssid; $("f_pw").value = pw; $("f_hidden").checked = hidden; $("f_open").checked = false;
+  $("f_pw").placeholder = isEdit && !window.showPasswords ? "leave empty to keep the current password" : "";
+  $("openrow").hidden = !isEdit; $("cancel").hidden = !isEdit;
+  $("f_pw").type = "password"; showPw = false; $("showpw").textContent = "Show";
+  $("formcard").scrollIntoView({behavior: "smooth"});
+  if (!ssid) $("f_ssid").focus(); else $("f_pw").focus();
+}
+function add(ssid) { editing = null; openForm("Add network", ssid || "", "", false, false); }
+function edit(n) { editing = n.ssid; openForm("Edit network", n.ssid, window.showPasswords ? (n.password || "") : "", n.hidden, true); }
+
+$("form").onsubmit = function (ev) {
+  ev.preventDefault();
+  var ssid = $("f_ssid").value, pw = $("f_pw").value, body = {ssid: ssid, hidden: $("f_hidden").checked};
+  if (pw && (pw.length < 8 || pw.length > 64)) { toast("Password must be 8-64 characters"); return; }
+  if (editing !== null) {
+    body.original_ssid = editing;
+    if ($("f_open").checked) body.password = "";
+    else if (pw || window.showPasswords) body.password = pw;
+  } else body.password = pw;
+  api("networks/save", body).then(function () {
+    toast("Saved “" + ssid + "”"); editing = null; openForm("Add network", "", "", false, false);
+    return loadNets();
+  }).catch(function (e) { toast(e.message); });
+};
+$("cancel").onclick = function () { editing = null; openForm("Add network", "", "", false, false); };
+$("showpw").onclick = function () { showPw = !showPw; $("f_pw").type = showPw ? "text" : "password"; $("showpw").textContent = showPw ? "Hide" : "Show"; };
+
+function connect(ssid) {
+  api("connect", ssid ? {ssid: ssid} : {}).then(function () {
+    toast("Connecting… if this page stops responding, reconnect to the setup network.");
+    setTimeout(poll, 4000);
+  }).catch(function (e) { toast(e.message); });
+}
+function del(ssid) {
+  if (!confirm("Delete “" + ssid + "”?")) return;
+  api("networks/delete", {ssid: ssid}).then(loadNets).catch(function (e) { toast(e.message); });
+}
+
+$("scan").onclick = scan;
+$("exit").onclick = function () {
+  api("exit", {}).then(function () { toast("Leaving setup mode. The device keeps using the saved networks."); }).catch(function (e) { toast(e.message); });
+};
+$("reboot").onclick = function () {
+  if (!confirm("Reboot the device?")) return;
+  api("reboot", {}).then(function () { toast("Rebooting…"); }).catch(function (e) { toast(e.message); });
+};
+$("logbox").ontoggle = function () {
+  if (!$("logbox").open) return;
+  api("logs?n=40").then(function (j) { $("log").textContent = j.lines.join("\n"); }).catch(function () {});
+};
+
+loadNets().then(function () { add(""); }).catch(function () {});
+poll(); timer = setInterval(poll, 4000);
+api("scan").then(function (j) { renderAvail(j.networks, j.error); }).catch(function () {});
+</script>
+</body>
+</html>
