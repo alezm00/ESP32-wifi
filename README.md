@@ -23,6 +23,14 @@ mpremote fs mkdir :lib
 mpremote cp -r wifimanager :lib/
 ```
 
+Or let `mip` fetch it from GitHub (it installs into `/lib/wifimanager/`):
+
+```bash
+mpremote mip install github:alezm00/ESP32-wifi
+```
+
+Other packages can list it as a dependency in their own `package.json`: `"deps": [["github:alezm00/ESP32-wifi", "main"]]`.
+
 The folder contains `*.py` modules and `www/index.html` (the web page, streamed from flash, never loaded in RAM).
 Everything else in this repository (`examples/`, `tests/`) is for you / development only.
 

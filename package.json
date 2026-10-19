@@ -1,0 +1,13 @@
+{
+  "urls": [
+    ["wifimanager/__init__.py", "github:alezm00/ESP32-wifi/wifimanager/__init__.py"],
+    ["wifimanager/compat.py", "github:alezm00/ESP32-wifi/wifimanager/compat.py"],
+    ["wifimanager/config.py", "github:alezm00/ESP32-wifi/wifimanager/config.py"],
+    ["wifimanager/dns.py", "github:alezm00/ESP32-wifi/wifimanager/dns.py"],
+    ["wifimanager/log.py", "github:alezm00/ESP32-wifi/wifimanager/log.py"],
+    ["wifimanager/manager.py", "github:alezm00/ESP32-wifi/wifimanager/manager.py"],
+    ["wifimanager/portal.py", "github:alezm00/ESP32-wifi/wifimanager/portal.py"],
+    ["wifimanager/www/index.html", "github:alezm00/ESP32-wifi/wifimanager/www/index.html"]
+  ],
+  "version": "1.0.0"
+}
