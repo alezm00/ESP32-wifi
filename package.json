@@ -9,5 +9,5 @@
     ["wifimanager/portal.py", "github:alezm00/ESP32-wifi/wifimanager/portal.py"],
     ["wifimanager/www/index.html", "github:alezm00/ESP32-wifi/wifimanager/www/index.html"]
   ],
-  "version": "1.0.0"
+  "version": "2.0.0"
 }

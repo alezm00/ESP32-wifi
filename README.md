@@ -34,7 +34,8 @@ Other packages can list it as a dependency in their own `package.json`: `"deps":
 The folder contains `*.py` modules and `www/index.html` (the web page, streamed from flash, never loaded in RAM).
 Everything else in this repository (`examples/`, `tests/`) is for you / development only.
 
-Requirements: MicroPython ≥ 1.20 for ESP32 (works on ESP32, S2, S3, C3). Flash use ≈ 58 kB of `.py` + 12 kB web page
+Requirements: **MicroPython v1.29.0** (the latest release; older firmware is not supported) on ESP32, S2, S3 or C3.
+The library uses the current `network` API (`WLAN.IF_STA`, `WLAN.SEC_*`, `ipconfig()`, `network.hostname()`). Flash use ≈ 57 kB of `.py` + 12 kB web page
 (≈ 23 kB of code when compiled with `mpy-cross`). RAM use was not measured on a board; the portal is imported only while config mode is open to keep normal running light.
 
 ## 2. Quick start
@@ -227,7 +228,8 @@ There is no roaming: once connected the manager stays on the current network unt
 
 * **One class (`WiFiManager`)**, one public import. WiFi handling is *state*: radio handles, retry counters, a state machine, config, callbacks, a background task.
   A class keeps this in one place, lets you configure everything once in `__init__`, and keeps several-instance/testing possible. Loose functions would need module-level globals.
-* **Small internal modules** (`config`, `log`, `portal`, `dns`, `compat`) keep each concern separate and let the RAM-hungry portal be **imported lazily**, only while config mode is open.
+* **Small internal modules** (`config`, `log`, `portal`, `dns`, `compat`) keep each concern separate (`compat` is only a
+  thin indirection over `time`/`asyncio`, so the tests can swap in a virtual clock) and let the RAM-hungry portal be **imported lazily**, only while config mode is open.
 * **One supervisor, three drivers.** The whole retry/loss logic is a single generator that yields "sleep N ms". `await wm.start()`, `wm.connect()` and `wm.check()` are thin drivers
   of the same code, so blocking and asyncio users get identical behaviour.
 
@@ -246,18 +248,27 @@ There is no roaming: once connected the manager stays on the current network unt
 
 Use `log_level="DEBUG"` to see every state change and every attempt.
 
-## 9. Development and tests (host, no board needed)
+## 9. Development and tests (no board needed)
+
+The tests run on the **MicroPython v1.29.0 unix port**, the same interpreter as on the board (CPython is not supported).
+Build it once and install the test runner:
 
 ```bash
-python3 -m unittest discover -s tests         # 60+ tests: config, supervisor on a virtual clock, portal over real sockets
-python3 tests/demo_portal.py                  # preview the web page on http://127.0.0.1:8080/ with a fake radio
+git clone --depth 1 --branch v1.29.0 https://github.com/micropython/micropython
+make -C micropython/mpy-cross && make -C micropython/ports/unix submodules && make -C micropython/ports/unix
+export PATH=$PWD/micropython/ports/unix/build-standard:$PATH
+micropython -m mip install unittest-discover
 ```
 
-`tests/fakes/` contains a fake `network` / `machine`. `tests/mp_smoke.py` also runs on the **real MicroPython** (unix port):
+Then, from the repository root:
 
 ```bash
-MICROPYPATH=.frozen:tests/fakes:. micropython tests/mp_smoke.py
+micropython -m unittest discover -s tests     # 65 tests: config, supervisor on a virtual clock, portal over real sockets
+micropython tests/demo_portal.py              # preview the web page on http://127.0.0.1:8080/ with a fake radio
 ```
+
+`tests/fakes/` contains a fake `network` (v1.29 API) and `machine`; `tests/_util.py` adds temporary directories and async tests,
+which MicroPython's `unittest` lacks.
 
 ### On-device checklist (needs a board)
 

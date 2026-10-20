@@ -1,19 +1,15 @@
-"""Fake `network` module for host tests: a scriptable radio environment.
+"""Fake `network` module (MicroPython v1.29 API) for the unix-port tests: a scriptable radio environment.
 
 Use `WORLD` to define access points and to flip them up/down. All timing goes through
 wifimanager.compat.ticks_ms(), so tests can run on a virtual clock.
 """
-STA_IF = 0
-AP_IF = 1
-AUTH_OPEN = 0
-AUTH_WPA2_PSK = 3
 STAT_IDLE = 1000
 STAT_CONNECTING = 1001
 STAT_GOT_IP = 1010
 STAT_WRONG_PASSWORD = 202
 STAT_NO_AP_FOUND = 201
 STAT_BEACON_TIMEOUT = 200
-STAT_ASSOC_FAIL = 203
+STAT_CONNECT_FAIL = 203
 STAT_HANDSHAKE_TIMEOUT = 204
 
 
@@ -54,6 +50,11 @@ WORLD = World()
 
 
 class WLAN:
+    IF_STA = 0
+    IF_AP = 1
+    SEC_OPEN = 0
+    SEC_WPA2 = 3
+
     def __init__(self, iface):
         self.iface = iface
         self._active = False
@@ -68,25 +69,37 @@ class WLAN:
             self._target = None
 
     def config(self, *args, **kw):
-        store = WORLD.ap_config if self.iface == AP_IF else WORLD.sta_config
+        store = WORLD.ap_config if self.iface == WLAN.IF_AP else WORLD.sta_config
         if args:
             key = args[0]
             if key == "mac":
                 return b"\x24\x0a\xc4\x12\xab\xcd"
-            if key == "essid":
-                return self._target[0] if self._target else store.get("essid", "")
+            if key == "ssid":
+                return self._target[0] if self._target else store.get("ssid", "")
             return store.get(key)
+        for k in kw:
+            if k not in ("ssid", "key", "security", "hidden", "channel", "reconnects", "max_clients"):
+                raise ValueError("unknown config param")  # what the v1.29 driver does
         store.update(kw)
 
     def ifconfig(self, cfg=None):
-        if cfg is not None:
-            self._ip = tuple(cfg)
-            return
-        if self.iface == AP_IF:
-            return self._ip if self._ip[0] != "0.0.0.0" else ("192.168.4.1", "255.255.255.0", "192.168.4.1", "8.8.8.8")
-        if self.isconnected():
-            return ("192.168.1.50", "255.255.255.0", "192.168.1.1", "192.168.1.1")
-        return ("0.0.0.0", "0.0.0.0", "0.0.0.0", "0.0.0.0")
+        # only the AP uses it (it sets the DNS handed to DHCP clients)
+        if cfg is None or self.iface != WLAN.IF_AP:
+            raise TypeError("the library must use ipconfig() for reading / the station")
+        self._ip = tuple(cfg)
+
+    def ipconfig(self, key):
+        if self.iface == WLAN.IF_AP:
+            ip = self._ip if self._ip[0] != "0.0.0.0" else ("192.168.4.1", "255.255.255.0", "192.168.4.1")
+        elif self.isconnected():
+            ip = ("192.168.1.50", "255.255.255.0", "192.168.1.1")
+        else:
+            ip = ("0.0.0.0", "0.0.0.0", "0.0.0.0")
+        if key == "addr4":
+            return (ip[0], ip[1])
+        if key == "gw4":
+            return ip[2]
+        raise ValueError("unexpected key")
 
     def connect(self, ssid, password=""):
         WORLD.connect_calls.append((ssid, password))
@@ -101,7 +114,7 @@ class WLAN:
         return WORLD.aps.get(self._target[0])
 
     def isconnected(self):
-        if self.iface == AP_IF or not self._active or not self._target:
+        if self.iface == WLAN.IF_AP or not self._active or not self._target:
             return False
         ap = self._ap()
         if ap and not ap["up"] and _now() - ap["down_at"] > WORLD.driver_give_up_ms:
@@ -140,7 +153,7 @@ class WLAN:
         for ssid, ap in WORLD.aps.items():
             if ap["up"] and not ap["hidden"]:
                 out.append((ssid.encode(), b"\x00" * 6, ap["channel"], ap["rssi"],
-                            AUTH_WPA2_PSK if ap["password"] else AUTH_OPEN, False))
+                            WLAN.SEC_WPA2 if ap["password"] else WLAN.SEC_OPEN, False))
         return out
 
 
