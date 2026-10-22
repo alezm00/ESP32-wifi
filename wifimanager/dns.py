@@ -32,11 +32,8 @@ class DNSServer:
 
     def start(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        except Exception:
-            pass
-        s.bind(("0.0.0.0", self.port))
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(socket.getaddrinfo("0.0.0.0", self.port)[0][-1])
         s.setblocking(False)
         self._sock = s
         self._running = True

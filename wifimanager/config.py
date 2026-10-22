@@ -13,9 +13,8 @@ File format (human readable, edit it with `mpremote edit` if you like)::
 `defaults_seen` remembers which SSIDs given to WiFiManager(networks=[...]) were already
 imported once, so networks you delete or edit later are not resurrected at the next boot.
 """
+import json
 import os
-
-from .compat import json
 
 VERSION = 1
 

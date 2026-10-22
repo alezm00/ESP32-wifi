@@ -6,13 +6,12 @@ import gc
 
 import network
 
-from . import compat as C
-from .compat import asyncio, json
+import asyncio
+import json
 
-try:
-    _DIR = __file__.rsplit("/", 1)[0]
-except Exception:
-    _DIR = "/lib/wifimanager"
+from . import compat as C
+
+_DIR = __file__.rsplit("/", 1)[0]
 
 _MAX_BODY = 2048
 _MAX_HEADERS = 3072
@@ -25,7 +24,7 @@ _REASONS = {200: "OK", 204: "No Content", 302: "Found", 400: "Bad Request", 404:
 
 class HttpError(Exception):
     def __init__(self, code, msg=""):
-        Exception.__init__(self, msg)
+        super().__init__(msg)
         self.code = code
         self.msg = msg
 
@@ -74,28 +73,18 @@ class Portal:
     # ---- lifecycle -----------------------------------------------------------------------
     def start(self):
         m = self.mgr
-        ap = network.WLAN(network.AP_IF)
+        ap = network.WLAN(network.WLAN.IF_AP)
         ap.active(True)
         if not self.ap_ssid:
-            try:
-                mac = m.wlan.config("mac")
-                self.ap_ssid = "ESP32-Setup-%02X%02X" % (mac[4], mac[5])
-            except Exception:
-                self.ap_ssid = "ESP32-Setup"
-        cfg = {"essid": self.ap_ssid}
+            mac = m.wlan.config("mac")
+            self.ap_ssid = "ESP32-Setup-%02X%02X" % (mac[4], mac[5])
         if m.ap_password:
-            cfg["password"] = m.ap_password
-            cfg["authmode"] = getattr(network, "AUTH_WPA2_PSK", 3)
+            ap.config(ssid=self.ap_ssid, key=m.ap_password, security=network.WLAN.SEC_WPA2)
         else:
-            cfg["authmode"] = getattr(network, "AUTH_OPEN", 0)
-        try:
-            ap.config(**cfg)
-        except Exception:  # some ports reject unknown keys: retry with the essentials
-            ap.config(essid=self.ap_ssid)
-        try:
-            ap.ifconfig((self.ap_ip, "255.255.255.0", self.ap_ip, self.ap_ip))
-        except Exception:
-            self.ap_ip = ap.ifconfig()[0]
+            ap.config(ssid=self.ap_ssid, security=network.WLAN.SEC_OPEN)
+        # ifconfig(), not ipconfig(): only its 4th item sets the DNS server the AP's DHCP hands to
+        # clients, and the captive portal needs that to be us
+        ap.ifconfig((self.ap_ip, "255.255.255.0", self.ap_ip, self.ap_ip))
         self.ap = ap
         self._running = True
         self.last_activity = C.ticks_ms()
@@ -190,9 +179,10 @@ class Portal:
                 n = int(headers.get("content-length", "0") or 0)
                 if n > _MAX_BODY:
                     raise HttpError(413)
+                # read the body before any other refusal: closing with unread data sends a TCP reset
+                raw = await reader.readexactly(n) if n else b""
                 if "application/json" not in headers.get("content-type", ""):
                     raise HttpError(415, "Content-Type must be application/json")
-                raw = await reader.readexactly(n) if n else b""
                 try:
                     body = json.loads(raw) if raw else {}
                 except ValueError:

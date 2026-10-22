@@ -1,9 +1,9 @@
 import _setup  # noqa: F401
 import json
 import os
-import shutil
-import tempfile
 import unittest
+
+from _util import exists, rmtree, tmpdir
 
 from wifimanager.config import ConfigStore
 from wifimanager.log import Logger
@@ -18,11 +18,11 @@ def store(path):
 
 class ConfigTests(unittest.TestCase):
     def setUp(self):
-        self.dir = tempfile.mkdtemp()
-        self.path = os.path.join(self.dir, "wifi.json")
+        self.dir = tmpdir()
+        self.path = self.dir + "/wifi.json"
 
     def tearDown(self):
-        shutil.rmtree(self.dir, ignore_errors=True)
+        rmtree(self.dir)
 
     def test_missing_file_is_empty(self):
         self.assertEqual(store(self.path).networks(), [])
@@ -67,7 +67,7 @@ class ConfigTests(unittest.TestCase):
             f.write("{not json")
         s = store(self.path)
         self.assertEqual(s.networks(), [])
-        self.assertTrue(os.path.exists(self.path + ".bad"))
+        self.assertTrue(exists(self.path + ".bad"))
 
     def test_recovers_from_tmp_if_main_missing(self):
         s = store(self.path)

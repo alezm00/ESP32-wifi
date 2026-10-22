@@ -1,24 +1,20 @@
-"""Portal tests: real asyncio, real sockets on localhost, fake radio."""
+"""Portal tests: real asyncio, real sockets on localhost, fake radio (MicroPython unix port)."""
 import _setup  # noqa: F401
 import asyncio
 import json
-import os
-import shutil
 import socket
-import tempfile
-import threading
 import time
 import unittest
-import urllib.request
 
-import machine
 import network
+from _util import async_test, rmtree, tmpdir
 from wifimanager import WiFiManager, compat
 from wifimanager.dns import DNSServer, build_reply
 
 W = network.WORLD
 PORT = 18080
-INDEX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wifimanager", "www", "index.html")
+DNS_PORT = 15353
+INDEX = _setup.ROOT + "/wifimanager/www/index.html"
 
 
 def make_manager(directory, networks=None, **kw):
@@ -26,16 +22,33 @@ def make_manager(directory, networks=None, **kw):
     kw.setdefault("portal_port", PORT)
     kw.setdefault("captive_portal", False)
     kw.setdefault("log_level", "DEBUG")
-    wm = WiFiManager(networks, config_file=os.path.join(directory, "wifi.json"), **kw)
+    wm = WiFiManager(networks, config_file=directory + "/wifi.json", **kw)
     wm.log.console = False
     return wm
 
 
-class PortalTests(unittest.IsolatedAsyncioTestCase):
+async def http(method, path, body=None, host="192.168.4.1", ctype="application/json", raw_body=None, length=None):
+    r, w = await asyncio.open_connection("127.0.0.1", PORT)
+    data = raw_body if raw_body is not None else (json.dumps(body).encode() if body is not None else b"")
+    req = "%s %s HTTP/1.1\r\nHost: %s\r\n" % (method, path, host)
+    if method == "POST":
+        req += "Content-Type: %s\r\nContent-Length: %d\r\n" % (ctype, len(data) if length is None else length)
+    w.write(req.encode() + b"\r\n" + data)
+    await w.drain()
+    raw = await asyncio.wait_for(r.read(-1), 10)
+    w.close()
+    await w.wait_closed()
+    head, _, payload = raw.partition(b"\r\n\r\n")
+    lines = head.decode().split("\r\n")
+    headers = dict(line.split(": ", 1) for line in lines[1:])
+    return int(lines[0].split()[1]), headers, payload
+
+
+class PortalTests(unittest.TestCase):
     async def asyncSetUp(self):
         W.reset()
         W.ap_clients = [b"\x01" * 6]          # somebody is using the setup page: no background retries
-        self.dir = tempfile.mkdtemp()
+        self.dir = tmpdir()
         self.old_linger = WiFiManager.PORTAL_LINGER_MS
         WiFiManager.PORTAL_LINGER_MS = 600
         self.wm = make_manager(self.dir)
@@ -47,35 +60,24 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         self.wm.stop()
         await asyncio.sleep(0.1)
         WiFiManager.PORTAL_LINGER_MS = self.old_linger
-        shutil.rmtree(self.dir, ignore_errors=True)
+        rmtree(self.dir)
 
     async def until(self, cond, timeout=10):
-        end = time.monotonic() + timeout
+        end = time.ticks_add(time.ticks_ms(), int(timeout * 1000))
         while not cond():
-            if time.monotonic() > end:
+            if time.ticks_diff(end, time.ticks_ms()) < 0:
                 self.fail("timed out waiting for condition")
-            await asyncio.sleep(0.05)
+            await asyncio.sleep_ms(50)
 
-    async def http(self, method, path, body=None, host="192.168.4.1", ctype="application/json", raw_body=None):
-        r, w = await asyncio.open_connection("127.0.0.1", PORT)
-        data = raw_body if raw_body is not None else (json.dumps(body).encode() if body is not None else b"")
-        req = "%s %s HTTP/1.1\r\nHost: %s\r\n" % (method, path, host)
-        if method == "POST":
-            req += "Content-Type: %s\r\nContent-Length: %d\r\n" % (ctype, len(data))
-        w.write(req.encode() + b"\r\n" + data)
-        await w.drain()
-        raw = await asyncio.wait_for(r.read(), 10)
-        w.close()
-        head, _, payload = raw.partition(b"\r\n\r\n")
-        lines = head.decode().split("\r\n")
-        headers = dict(l.split(": ", 1) for l in lines[1:])
-        return int(lines[0].split()[1]), headers, payload
+    async def http(self, *args, **kw):
+        return await http(*args, **kw)
 
     async def api(self, method, path, body=None, **kw):
         status, headers, payload = await self.http(method, "/api/" + path, body, **kw)
         return status, json.loads(payload)
 
     # ---- pages -----------------------------------------------------------------------------
+    @async_test
     async def test_serves_the_web_page(self):
         status, headers, body = await self.http("GET", "/")
         with open(INDEX, "rb") as f:
@@ -84,16 +86,18 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("text/html", headers["Content-Type"])
         self.assertEqual(int(headers["Content-Length"]), len(body))
 
+    @async_test
     async def test_status(self):
         status, j = await self.api("GET", "status")
         self.assertEqual(status, 200)
         self.assertEqual((j["state"], j["portal"], j["connected"]), ("portal", True, False))
         self.assertEqual(j["ap_ssid"], "ESP32-Setup-ABCD")
         self.assertEqual(j["ap_ip"], "192.168.4.1")
-        self.assertEqual(W.ap_config["essid"], "ESP32-Setup-ABCD")
-        self.assertEqual(W.ap_config["authmode"], network.AUTH_OPEN)
+        self.assertEqual(W.ap_config["ssid"], "ESP32-Setup-ABCD")
+        self.assertEqual(W.ap_config["security"], network.WLAN.SEC_OPEN)
 
     # ---- captive portal ------------------------------------------------------------------
+    @async_test
     async def test_captive_probes_are_redirected(self):
         for host, path in (("connectivitycheck.gstatic.com", "/generate_204"),
                            ("captive.apple.com", "/hotspot-detect.html"),
@@ -106,6 +110,7 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 302)
 
     # ---- API: networks ----------------------------------------------------------------------
+    @async_test
     async def test_add_edit_delete_networks(self):
         status, j = await self.api("POST", "networks/save", {"ssid": "Home", "password": "homepass12", "hidden": False})
         self.assertEqual((status, j), (200, {"ok": True}))
@@ -123,12 +128,13 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         await self.api("POST", "networks/save", {"ssid": "Home2", "password": "", "original_ssid": "Home2"})
         self.assertEqual(self.wm.networks()[0]["password"], "")
         # persisted as plain JSON
-        with open(os.path.join(self.dir, "wifi.json")) as f:
+        with open(self.dir + "/wifi.json") as f:
             self.assertEqual(json.load(f)["networks"][0]["ssid"], "Home2")
         _, j = await self.api("POST", "networks/delete", {"ssid": "Home2"})
         self.assertTrue(j["ok"])
         self.assertEqual(self.wm.networks(), [])
 
+    @async_test
     async def test_validation_errors_are_400(self):
         for body in ({"ssid": ""}, {"ssid": "x", "password": "short"}, {"ssid": "x" * 40},
                      {"ssid": "A", "original_ssid": "does-not-exist"}):
@@ -136,6 +142,7 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(status, 400, body)
             self.assertIn("error", j)
 
+    @async_test
     async def test_show_passwords_option(self):
         self.wm.stop()
         await asyncio.sleep(0.2)
@@ -148,6 +155,7 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(j["networks"][0]["password"], "homepass12")
 
     # ---- API: scan, logs, bad requests -------------------------------------------------------
+    @async_test
     async def test_scan_lists_saved_flag_and_sorts_by_signal(self):
         W.add_ap("Far", "farpass123", rssi=-85)
         W.add_ap("Near", "nearpass12", rssi=-40, channel=11)
@@ -162,6 +170,7 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         await self.api("GET", "scan")              # cached
         self.assertEqual(W.scan_calls, calls)
 
+    @async_test
     async def test_scan_error_is_reported_with_cached_results(self):
         W.add_ap("Near", "nearpass12")
         await self.api("GET", "scan?refresh=1")
@@ -171,16 +180,19 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Wifi Internal State Error", j["error"])
         self.assertEqual(j["networks"][0]["ssid"], "Near")
 
+    @async_test
     async def test_logs(self):
         _, j = await self.api("GET", "logs?n=5")
         self.assertTrue(0 < len(j["lines"]) <= 5)
 
+    @async_test
     async def test_bad_requests(self):
         status, _, _ = await self.http("POST", "/api/networks/save", ctype="text/plain", raw_body=b'{"ssid":"x"}')
         self.assertEqual(status, 415)                       # blocks cross-site form posts
         status, _, _ = await self.http("POST", "/api/networks/save", raw_body=b"{nope")
         self.assertEqual(status, 400)
-        status, _, _ = await self.http("POST", "/api/networks/save", raw_body=b"x" * 5000)
+        # announced too big: refused before the body is read (sending it would only earn a TCP reset)
+        status, _, _ = await self.http("POST", "/api/networks/save", raw_body=b"", length=5000)
         self.assertEqual(status, 413)
         status, _, _ = await self.http("PUT", "/api/status")
         self.assertEqual(status, 405)
@@ -192,6 +204,7 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
 
     # ---- API: actions ------------------------------------------------------------------------
+    @async_test
     async def test_connect_from_portal_then_portal_closes(self):
         W.add_ap("Home", "homepass12", delay_ms=300)
         await self.api("POST", "networks/save", {"ssid": "Home", "password": "homepass12"})
@@ -200,9 +213,11 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         await self.until(lambda: self.wm.state == "connected", 15)
         self.assertEqual(self.wm.ssid, "Home")
         await self.until(lambda: not self.wm.portal_active, 5)   # lingers 0.6 s after success
-        with self.assertRaises(OSError):
-            await asyncio.open_connection("127.0.0.1", PORT)     # port released
+        await asyncio.sleep_ms(100)                             # the cancelled server task closes its socket
+        with self.assertRaises(OSError):                         # port released (a non-blocking connect
+            await self.http("GET", "/")                          # only fails at the first read)
 
+    @async_test
     async def test_exit_closes_portal_and_it_can_be_reopened(self):
         await self.api("POST", "exit", {})
         await self.until(lambda: not self.wm.portal_active)
@@ -212,12 +227,14 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         status, _ = await self.api("GET", "status")
         self.assertEqual(status, 200)
 
+    @async_test
     async def test_reboot_endpoint(self):
         resets = []
         self.wm._do_reset = lambda: resets.append(1) or setattr(self.wm, "_reset_at", None)
         await self.api("POST", "reboot", {})
         await self.until(lambda: resets, 6)
 
+    @async_test
     async def test_async_callbacks(self):
         events = []
 
@@ -229,7 +246,7 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         await self.until(lambda: events == [False])
 
 
-class DnsTests(unittest.IsolatedAsyncioTestCase):
+class DnsTests(unittest.TestCase):
     QUERY = (b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
              b"\x07example\x03com\x00\x00\x01\x00\x01")
 
@@ -250,21 +267,22 @@ class DnsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(build_reply(self.QUERY[:2] + b"\x81\x80" + self.QUERY[4:], b"\x00" * 4))
         self.assertIsNone(build_reply(self.QUERY[:20], b"\x00" * 4))
 
+    @async_test
     async def test_udp_server(self):
-        d = DNSServer("192.168.4.1", port=0)
+        d = DNSServer("192.168.4.1", port=DNS_PORT)
         d.start()
-        port = d._sock.getsockname()[1]
         task = asyncio.create_task(d.serve())
-
-        def ask():
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.settimeout(3)
-            s.sendto(self.QUERY, ("127.0.0.1", port))
-            data = s.recvfrom(512)[0]
-            s.close()
-            return data
-
-        data = await asyncio.get_running_loop().run_in_executor(None, ask)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.setblocking(False)
+        s.sendto(self.QUERY, socket.getaddrinfo("127.0.0.1", DNS_PORT)[0][-1])
+        data = None
+        for _ in range(100):
+            try:
+                data = s.recvfrom(512)[0]
+                break
+            except OSError:  # not answered yet
+                await asyncio.sleep_ms(20)
+        s.close()
         self.assertEqual(data[-4:], bytes([192, 168, 4, 1]))
         d.stop()
         await asyncio.wait_for(task, 2)
@@ -276,45 +294,41 @@ class BlockingPortalTest(unittest.TestCase):
     def test_connect_serves_portal_until_configured(self):
         W.reset()
         W.add_ap("Home", "homepass12", delay_ms=200)
-        d = tempfile.mkdtemp()
+        d = tmpdir()
         old = WiFiManager.PORTAL_LINGER_MS
         WiFiManager.PORTAL_LINGER_MS = 300
         wm = make_manager(d)
         result = {}
 
-        def browser():
-            base = "http://127.0.0.1:%d" % PORT
+        async def browser():  # runs inside the event loop that connect() pumps
             for _ in range(100):
                 try:
-                    result["page"] = urllib.request.urlopen(base + "/", timeout=2).read()
+                    result["page"] = (await http("GET", "/"))[2]
                     break
-                except Exception:
-                    time.sleep(0.1)
+                except OSError:
+                    await asyncio.sleep_ms(100)
             for path, body in (("/api/networks/save", {"ssid": "Home", "password": "homepass12"}),
                                ("/api/connect", {"ssid": "Home"})):
-                req = urllib.request.Request(base + path, json.dumps(body).encode(),
-                                             {"Content-Type": "application/json"})
-                result[path] = json.load(urllib.request.urlopen(req, timeout=5))
+                result[path] = json.loads((await http("POST", path, body))[2])
 
-        t = threading.Thread(target=browser)
-        t.start()
+        asyncio.create_task(browser())
         try:
             ok = wm.connect(timeout=30)
-            t.join(5)
             self.assertTrue(ok)
-            self.assertIn(b"<html", result["page"])
+            self.assertTrue(b"<html" in result["page"])
+            self.assertEqual(result["/api/connect"], {"ok": True})
             self.assertEqual(wm.ssid, "Home")
             for _ in range(60):                     # portal lingers briefly, then check() closes it
                 wm.check()
                 if not wm.portal_active:
                     break
-                time.sleep(0.05)
+                time.sleep_ms(50)
             self.assertFalse(wm.portal_active)
         finally:
             wm.stop()
             compat.run_for(50)
             WiFiManager.PORTAL_LINGER_MS = old
-            shutil.rmtree(d, ignore_errors=True)
+            rmtree(d)
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ from .compat import ticks_add, ticks_diff
 from .config import ConfigStore, clean_password, clean_ssid
 from .log import Logger
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 
 # supervisor states (what `wm.state` returns)
 IDLE = "idle"
@@ -34,17 +34,14 @@ MODE_BUTTON = "button"
 MODE_NEVER = "never"
 _MODES = (MODE_ON_FAIL, MODE_ALWAYS, MODE_BUTTON, MODE_NEVER)
 
-_STAT_WRONG_PASSWORD = getattr(network, "STAT_WRONG_PASSWORD", 202)
-_STAT_NAMES = ("STAT_IDLE", "STAT_CONNECTING", "STAT_WRONG_PASSWORD", "STAT_NO_AP_FOUND",
-               "STAT_CONNECT_FAIL", "STAT_GOT_IP", "STAT_ASSOC_FAIL", "STAT_BEACON_TIMEOUT",
-               "STAT_HANDSHAKE_TIMEOUT")
+_STATUS = {network.STAT_IDLE: "idle", network.STAT_CONNECTING: "connecting",
+           network.STAT_WRONG_PASSWORD: "wrong password", network.STAT_NO_AP_FOUND: "no ap found",
+           network.STAT_CONNECT_FAIL: "connect fail", network.STAT_GOT_IP: "got ip",
+           network.STAT_BEACON_TIMEOUT: "beacon timeout", network.STAT_HANDSHAKE_TIMEOUT: "handshake timeout"}
 
 
 def status_text(code):
-    for name in _STAT_NAMES:
-        if getattr(network, name, None) == code:
-            return name[5:].lower().replace("_", " ")
-    return "status %s" % code
+    return _STATUS.get(code, "status %s" % code)
 
 
 class WiFiManager:
@@ -116,7 +113,7 @@ class WiFiManager:
             except Exception as e:
                 self.log.error("could not store default networks: %s", C.exc_text(e))
 
-        self.wlan = network.WLAN(network.STA_IF)
+        self.wlan = network.WLAN(network.WLAN.IF_STA)
 
         # supervisor state
         self._sta = IDLE
@@ -165,7 +162,7 @@ class WiFiManager:
 
     @property
     def ip(self):
-        return self.wlan.ifconfig()[0] if self.wlan.isconnected() else None
+        return self.wlan.ipconfig("addr4")[0] if self.wlan.isconnected() else None
 
     @property
     def portal_active(self):
@@ -186,7 +183,7 @@ class WiFiManager:
         w = self.wlan
         up = bool(w.isconnected())
         d = {"state": self._pub, "connected": up, "ssid": self._ssid if up else None,
-             "ip": w.ifconfig()[0] if up else None, "rssi": self.rssi(), "mode": self.config_mode,
+             "ip": w.ipconfig("addr4")[0] if up else None, "rssi": self.rssi(), "mode": self.config_mode,
              "hostname": self.hostname, "version": __version__,
              "failed_cycles": self._failed_cycles, "last_error": self._last_error,
              "portal": self._portal is not None}
@@ -428,18 +425,9 @@ class WiFiManager:
         self._running = True
         w = self.wlan
         w.active(True)
-        try:
-            network.hostname(self.hostname)
-        except Exception:
-            try:
-                w.config(dhcp_hostname=self.hostname)
-            except Exception:
-                pass
+        network.hostname(self.hostname)
         if self.driver_reconnects is not None:
-            try:
-                w.config(reconnects=self.driver_reconnects)
-            except Exception:
-                pass
+            w.config(reconnects=self.driver_reconnects)
         if self.button_pin is not None and self._btn is None:
             self._init_button()
         self._offline_since = C.ticks_ms()
@@ -572,7 +560,7 @@ class WiFiManager:
         try:
             if self.wlan.isconnected():  # e.g. after a soft reboot the radio can still be associated
                 try:
-                    ssid = self.wlan.config("essid")
+                    ssid = self.wlan.config("ssid")
                 except Exception:
                     ssid = None
                 self._on_connected(ssid)
@@ -736,7 +724,7 @@ class WiFiManager:
                 ok = yield from self._attempt(net)
                 if ok:
                     return True
-                if self._last_error == status_text(_STAT_WRONG_PASSWORD):
+                if self._last_error == status_text(network.STAT_WRONG_PASSWORD):
                     break  # retrying with the same password is pointless
                 yield 500
         return False
@@ -766,12 +754,12 @@ class WiFiManager:
                 self._ssid = net["ssid"]
                 return True
             st = w.status()
-            if st == _STAT_WRONG_PASSWORD:
+            if st == network.STAT_WRONG_PASSWORD:
                 self._last_error = status_text(st)
                 self.log.error("'%s': wrong password", net["ssid"])
                 break
             if ticks_diff(C.ticks_ms(), start) >= self.connect_timeout * 1000:
-                self._last_error = status_text(st) if st != getattr(network, "STAT_CONNECTING", 1001) else "timeout"
+                self._last_error = status_text(st) if st != network.STAT_CONNECTING else "timeout"
                 self.log.warning("'%s': %s", net["ssid"], self._last_error)
                 break
         try:
@@ -792,7 +780,7 @@ class WiFiManager:
         self._last_error = ""
         self._first_done = True
         self._set_sta(CONNECTED)
-        ip = self.wlan.ifconfig()[0]
+        ip = self.wlan.ipconfig("addr4")[0]
         self.log.info("connected to '%s' ip=%s rssi=%s", self._ssid, ip, self.rssi())
         if self._portal is not None and self.config_mode != MODE_ALWAYS:
             self._portal_close_at = ticks_add(now, self.PORTAL_LINGER_MS)

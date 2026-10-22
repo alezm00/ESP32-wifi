@@ -9,6 +9,10 @@ def reset():
     raise ResetCalled()
 
 
+def unique_id():
+    return b"\x24\x0a\xc4\x12\xab\xcd"
+
+
 class Pin:
     IN = 0
     OUT = 1

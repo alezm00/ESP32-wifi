@@ -1,14 +1,12 @@
 """Virtual-clock harness: runs the WiFiManager supervisor generator without sleeping."""
 import _setup  # noqa: F401
-import os
-import shutil
-import tempfile
 
 import machine
 import network
 from wifimanager import compat
 import wifimanager.portal as portal_module
 from wifimanager import WiFiManager
+from _util import rmtree, tmpdir
 
 _orig = (compat.ticks_ms, compat.sleep_ms_blocking, compat.run_for, portal_module.Portal)
 W = network.WORLD
@@ -51,18 +49,18 @@ class Sim:
         W.reset()
         W.add_ap("Neighbor", "neighborpw", rssi=-90)   # scans are never empty (an empty scan = "scan failed")
         machine.Pin.levels.clear()
-        self.dir = tempfile.mkdtemp()
+        self.dir = tmpdir()
         self.events = []
 
     def close(self):
         compat.ticks_ms, compat.sleep_ms_blocking, compat.run_for, portal_module.Portal = _orig
-        shutil.rmtree(self.dir, ignore_errors=True)
+        rmtree(self.dir)
 
     def advance(self, ms):
         self.t += ms
 
     def path(self, name="wifi_config.json"):
-        return os.path.join(self.dir, name)
+        return self.dir + "/" + name
 
     def make(self, networks=None, **kw):
         kw.setdefault("config_file", self.path())

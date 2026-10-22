@@ -1,16 +1,15 @@
-"""Preview the configuration page on your PC (no ESP32 needed).
+"""Preview the configuration page on your PC (no ESP32 needed), with the MicroPython unix port.
 
-    python3 tests/demo_portal.py [port]      then open http://127.0.0.1:8080/
+    micropython tests/demo_portal.py [port]      then open http://127.0.0.1:8080/
 
 A fake radio provides a few access points, so scanning, adding, editing and connecting all work.
 """
 import _setup  # noqa: F401
 import asyncio
-import os
 import sys
-import tempfile
 
 import network
+from _util import tmpdir
 from wifimanager import WiFiManager
 
 W = network.WORLD
@@ -23,7 +22,7 @@ async def main(port):
     W.add_ap("CoffeeShop", "", rssi=-71, channel=1)
     W.add_ap("Neighbour", "nope-nope-nope", rssi=-84, channel=11)
     W.ap_clients = [b"\x01" * 6]          # pretend a phone is attached to the setup network
-    path = os.path.join(tempfile.mkdtemp(), "wifi_config.json")
+    path = tmpdir() + "/wifi_config.json"
     wm = WiFiManager([("Office-5G", "wrong-password"), ("SecretSSID", "hidden-pass1", True)],
                      config_file=path, config_mode="always", portal_port=port, captive_portal=False,
                      hostname="esp32-demo", log_level="DEBUG")

@@ -2,6 +2,7 @@ import harness  # noqa: F401  (sets up sys.path, fakes, virtual clock)
 import unittest
 
 import machine
+from _util import exists
 from harness import Sim, W
 
 from wifimanager import WiFiManager, compat
@@ -116,7 +117,7 @@ class ManagerTests(unittest.TestCase):
         self.assertIn("backoff", states)
         W.set_up("Home", True)
         self.assertTrue(self.sim.run(wm, self.connected(wm), 120000))
-        self.assertGreater(len(W.connect_calls), n_connects)
+        self.assertTrue(len(W.connect_calls) > n_connects)
         self.assertIn("taking over", "\n".join(wm.log.tail()))
 
     def test_internet_check_forces_reconnect(self):
@@ -159,7 +160,7 @@ class ManagerTests(unittest.TestCase):
             wm = self.sim.make([("Gone", "password1")], config_mode=mode, max_cycles=2, **extra)
             self.sim.run(wm, ms=300000)
             self.assertIsNone(self.sim.portal, mode)
-            self.assertGreater(wm._failed_cycles, 2)
+            self.assertTrue(wm._failed_cycles > 2)
 
     def test_always_mode_opens_portal_at_start_and_keeps_it(self):
         W.add_ap("Home", "homepass12")
@@ -270,7 +271,7 @@ class ManagerTests(unittest.TestCase):
 
     def test_public_networks_hide_passwords_by_default(self):
         wm = self.sim.make([("Home", "homepass12")])
-        self.assertNotIn("password", wm.networks_public()[0])
+        self.assertFalse("password" in wm.networks_public()[0])
         self.assertTrue(wm.networks_public()[0]["has_password"])
         wm = self.sim.make(None, show_passwords=True)
         self.assertEqual(wm.networks_public()[0]["password"], "homepass12")
@@ -297,9 +298,8 @@ class ManagerTests(unittest.TestCase):
         self.sim.run(wm, self.connected(wm), 60000)
         for i in range(30):
             wm.log.info("filler line number %d", i)
-        import os
-        self.assertTrue(os.path.exists(self.sim.path("wifi.log.1")))
-        self.assertNotIn("homepass12", "\n".join(wm.log.tail()))
+        self.assertTrue(exists(self.sim.path("wifi.log.1")))
+        self.assertFalse("homepass12" in "\n".join(wm.log.tail()))
 
     # ---- blocking / polling API ---------------------------------------------------------
     def test_blocking_connect(self):
